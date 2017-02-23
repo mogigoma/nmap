@@ -487,6 +487,25 @@ static void cert_pem_to_string(lua_State *L, X509 *cert)
 }
 
 /* This is a helper function for l_get_ssl_certificate. It converts the
+   certificate into a DER-encoded string on the stack. */
+static void cert_der_to_string(lua_State *L, X509 *cert)
+{
+  BIO *bio;
+  char *buf;
+  long size;
+
+  bio = BIO_new(BIO_s_mem());
+  assert(bio != NULL);
+
+  assert(i2d_X509_bio(bio, cert));
+
+  size = BIO_get_mem_data(bio, &buf);
+  lua_pushlstring(L, buf, size);
+
+  BIO_vfree(bio);
+}
+
+/* This is a helper function for l_get_ssl_certificate. It converts the
    public-key type to a string. */
 static const char *pkey_type_to_string(int type)
 {
@@ -672,6 +691,9 @@ static int parse_ssl_cert(lua_State *L, X509 *cert)
 
   cert_pem_to_string(L, cert);
   lua_setfield(L, -2, "pem");
+
+  cert_der_to_string(L, cert);
+  lua_setfield(L, -2, "der");
 
 #if HAVE_OPAQUE_STRUCTS
   if (x509_extensions_to_table(L, X509_get0_extensions(cert))) {
