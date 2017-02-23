@@ -20,9 +20,11 @@
 local bin = require "bin"
 local bit = require "bit"
 local math = require "math"
+local openssl = require "openssl"
 local stdnse = require "stdnse"
 local string = require "string"
 local table = require "table"
+local unittest = require "unittest"
 _ENV = stdnse.module("asn1", stdnse.seeall)
 
 BERCLASS = {
@@ -429,6 +431,51 @@ ASN1Encoder = {
   end,
 
   ---
+  -- Encodes an OpenSSL BigNum according to ASN.1 basic encoding rules.
+  -- @name ASN1Encoder.encodeBigNum
+  -- @param val Value to be encoded.
+  -- @return Encoded integer.
+  encodeBigNum = function(val)
+    assert(type(val) == "userdata")
+
+    -- Number is zero.
+    local n = openssl.bignum_num_bits(val)
+    if n == 0 then
+      bin.pack("CC", 2, 0)
+    end
+
+    -- Assume number is positive.
+    local i = 0
+    local lsb = 0
+    local buf = ""
+    while i <= n do
+      lsb = 0
+      for j = i + 8, i, -1 do
+        if j < n then
+          local bit = openssl.bignum_is_bit_set(val, j)
+          if bit then
+            bit = 1
+          else
+            bit = 0
+          end
+
+          lsb = (lsb << 1) | bit
+        end
+      end
+      i = i + 8
+
+      -- Append the byte to the buffer.
+      buf = buf .. bin.pack("C", lsb)
+    end
+
+    if lsb > 127 then -- two's complement collision
+      buf = buf .. "\0"
+    end
+
+    return bin.pack("CC", 2, #buf) .. string.reverse(buf)
+  end,
+
+  ---
   -- Encodes the length part of a ASN.1 encoding triplet using the "primitive,
   -- definite-length" method.
   -- @name ASN1Encoder.encodeLength
@@ -502,5 +549,44 @@ function intToBER( i )
   return ber
 end
 
+-- Skip unit tests unless we're explicitly testing.
+if not unittest.testing() then
+  return _ENV
+end
+
+test_suite = unittest.TestSuite:new()
+
+-- Test encoding bignums as integers.
+local bignums = {
+  {
+    "00",
+    "02:01:00"
+  },
+  {
+    "7f",
+    "02:01:7f"
+  },
+  {
+    "80",
+    "02:02:00:80"
+  },
+  {
+    "0100",
+    "02:02:01:00"
+  },
+  {
+    "07d044fb5a58101c4174415c0c525b7d",
+    "02:10:07:d0:44:fb:5a:58:10:1c:41:74:41:5c:0c:52:5b:7d"
+  }
+}
+
+local enc = ASN1Encoder:new()
+for _, test in ipairs(bignums) do
+  local i = test[1] -- Input hex
+  local o = test[2] -- Output hex
+  local e = enc.encodeBigNum(openssl.bignum_hex2bn(i))
+  local s = stdnse.tohex(e, {separator = ":"})
+  test_suite:add_test(unittest.equal(s, o), ("Encode BN %s"):format(i))
+end
 
 return _ENV;
