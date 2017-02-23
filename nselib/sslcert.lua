@@ -897,18 +897,21 @@ end
 -- @return status true on success, false on failure
 -- @return cert userdata containing the SSL certificate, or error message on
 --         failure.
+-- @return table of cert userdatas containing the intermediate SSL certificates,
+--         or nil on failure.
 function getCertificate(host, port)
   local mutex = nmap.mutex("sslcert-cache-mutex")
   mutex "lock"
+
+  local cert, intermediates
 
   if ( host.registry["ssl-cert"] and
     host.registry["ssl-cert"][port.number] ) then
     stdnse.debug2("sslcert: Returning cached SSL certificate")
     mutex "done"
-    return true, host.registry["ssl-cert"][port.number]
+    cert, intermediates = table.unpack(host.registry["ssl-cert"][port.number])
+    return true, cert, intermediates
   end
-
-  local cert
 
   -- If we don't already know the service is TLS wrapped check to see if we
   -- have to use a wrapper and do a manual handshake
@@ -978,7 +981,18 @@ function getCertificate(host, port)
     cert, err = parse_ssl_certificate(certs.certificates[1])
     if not cert then
       mutex "done"
-      return false, ("Unable to get cert: %s"):format(err)
+      return false, ("Unable to parse cert: %s"):format(err)
+    end
+
+    local intermediate
+    intermediates = {}
+    for i = 2, #certs.certificates do
+      intermediate, err = parse_ssl_certificate(certs.certificates[i])
+      if not intermediate then
+        mutex "done"
+        return false, ("Unable to parse intermediate cert %d: %s"):format(i - 1, err)
+      end
+      table.insert(intermediates, intermediate)
     end
   else
     -- If we don't already know the service is TLS wrapped check to see if
@@ -1003,8 +1017,8 @@ function getCertificate(host, port)
         return false, "Failed to connect to server"
       end
     end
-    cert = socket:get_ssl_certificate()
-    if ( cert == nil ) then
+    cert, intermediates = socket:get_ssl_certificate()
+    if ( cert == nil or intermediates == nil ) then
       mutex "done"
       return false, "Unable to get cert"
     end
@@ -1012,9 +1026,9 @@ function getCertificate(host, port)
 
   host.registry["ssl-cert"] = host.registry["ssl-cert"] or {}
   host.registry["ssl-cert"][port.number] = host.registry["ssl-cert"][port.number] or {}
-  host.registry["ssl-cert"][port.number] = cert
+  host.registry["ssl-cert"][port.number] = {cert, intermediates}
   mutex "done"
-  return true, cert
+  return true, cert, intermediates
 end
 
 

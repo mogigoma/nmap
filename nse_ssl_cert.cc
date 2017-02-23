@@ -586,16 +586,36 @@ int l_parse_ssl_certificate(lua_State *L)
 
 int l_get_ssl_certificate(lua_State *L)
 {
+  int i, len;
   SSL *ssl;
   X509 *cert;
+  STACK_OF(X509) *chain;
 
   ssl = nse_nsock_get_ssl(L);
-  cert = SSL_get_peer_certificate(ssl);
-  if (cert == NULL) {
-    lua_pushnil(L);
-    return 1;
+  chain = SSL_get_peer_cert_chain(ssl);
+  if (chain == NULL) {
+    /* OpenSSL has been known to fail to deliver a chain in certain cases, so
+       fall back to the other API call if the first one fails. */
+    cert = SSL_get_peer_certificate(ssl);
+    if (cert == NULL) {
+      lua_pushnil(L);
+      return 1;
+    }
+    return parse_ssl_cert(L, cert);
   }
-  return parse_ssl_cert(L, cert);
+
+  len = sk_X509_num(chain);
+  for (i = 0; i < len; i++) {
+    cert = (X509 *) sk_X509_value(chain, i);
+    assert(cert != NULL);
+    parse_ssl_cert(L, cert);
+    if (i == 0)
+      lua_createtable(L, len - 1, 0);
+    else
+      lua_rawseti(L, -2, i);
+  }
+
+  return 2;
 }
 
 static int parse_ssl_cert(lua_State *L, X509 *cert)
