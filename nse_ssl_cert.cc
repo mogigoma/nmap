@@ -545,6 +545,23 @@ int lua_push_ecdhparams(lua_State *L, EVP_PKEY *pubkey) {
 #endif
 }
 
+static void get_serial_number(lua_State *L, X509 *cert)
+{
+  ASN1_INTEGER *serial;
+  bignum_data_t *data;
+
+  serial = X509_get_serialNumber(cert);
+  if (serial == NULL) {
+    lua_pushnil(L);
+    return;
+  }
+
+  data = (bignum_data_t *) lua_newuserdata(L, sizeof(bignum_data_t));
+  luaL_getmetatable(L, "BIGNUM");
+  lua_setmetatable(L, -2);
+  data->bn = ASN1_INTEGER_to_BN(serial, NULL);
+}
+
 static int parse_ssl_cert(lua_State *L, X509 *cert);
 
 int l_parse_ssl_certificate(lua_State *L)
@@ -606,6 +623,9 @@ static int parse_ssl_cert(lua_State *L, X509 *cert)
 #endif
   lua_pushstring(L, sig_algo);
   lua_setfield(L, -2, "sig_algorithm");
+
+  get_serial_number(L, cert);
+  lua_setfield(L, -2, "serial_number");
 
   issuer = X509_get_issuer_name(cert);
   if (issuer != NULL) {
