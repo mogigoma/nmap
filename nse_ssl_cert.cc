@@ -586,7 +586,7 @@ int l_parse_ssl_certificate(lua_State *L)
 
 int l_get_ssl_certificate(lua_State *L)
 {
-  int i, len;
+  int i, len, rc;
   SSL *ssl;
   X509 *cert;
   STACK_OF(X509) *chain;
@@ -599,7 +599,8 @@ int l_get_ssl_certificate(lua_State *L)
     cert = SSL_get_peer_certificate(ssl);
     if (cert == NULL) {
       lua_pushnil(L);
-      return 1;
+      lua_pushfstring(L, "Failed to get certificates from peer.", NULL);
+      return 2;
     }
     return parse_ssl_cert(L, cert);
   }
@@ -608,7 +609,20 @@ int l_get_ssl_certificate(lua_State *L)
   for (i = 0; i < len; i++) {
     cert = (X509 *) sk_X509_value(chain, i);
     assert(cert != NULL);
-    parse_ssl_cert(L, cert);
+
+    rc = parse_ssl_cert(L, cert);
+    if (rc == 2) {
+      /* Remove partial results for this function from the stack in favour of
+         the error message from parse_ssl_cert. */
+      if (i != 0) {
+        /* The stack is: cert intermediate-table nil errmsg */
+        lua_remove(L, -4);
+        lua_remove(L, -3);
+      }
+
+      return 2;
+    }
+
     if (i == 0)
       lua_createtable(L, len - 1, 0);
     else
