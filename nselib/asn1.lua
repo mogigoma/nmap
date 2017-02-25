@@ -158,19 +158,25 @@ ASN1Decoder = {
   -- @return The position after decoding.
   -- @return The length of the following value.
   decodeLength = function(encStr, pos)
+    assert(type(encStr) == "string")
+    pos = pos or 1
+
     local elen
-    pos, elen = bin.unpack('C', encStr, pos)
-    if (elen > 128) then
-      elen = elen - 128
-      local elenCalc = 0
-      local elenNext
-      for i = 1, elen do
-        elenCalc = elenCalc * 256
-        pos, elenNext = bin.unpack("C", encStr, pos)
-        elenCalc = elenCalc + elenNext
-      end
-      elen = elenCalc
+    pos, elen = bin.unpack("C", encStr, pos)
+    if (elen < 128) then
+      return pos, elen
     end
+
+    elen = elen - 128
+    local elenCalc = 0
+    local elenNext
+    for i = 1, elen do
+      elenCalc = elenCalc * 256
+      pos, elenNext = bin.unpack("C", encStr, pos)
+      elenCalc = elenCalc + elenNext
+    end
+    elen = elenCalc
+
     return pos, elen
   end,
 
@@ -609,13 +615,18 @@ local tests = {
   {4294967296, "85:01:00:00:00:00"}
 }
 
+local dec = ASN1Decoder:new()
 local enc = ASN1Encoder:new()
 for _, test in ipairs(tests) do
   local i = test[1] -- Input num
   local o = test[2] -- Output hex
+
   local e = enc.encodeLength(i)
   local s = stdnse.tohex(e, {separator = ":"})
   test_suite:add_test(unittest.equal(s, o), ("Encode Length %d"):format(i))
+
+  local _, d = dec.decodeLength(e)
+  test_suite:add_test(unittest.equal(d, i), ("Decode Length %s"):format(o))
 end
 
 return _ENV;
