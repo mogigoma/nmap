@@ -72,29 +72,29 @@ ASN1Decoder = {
     end
 
     -- Integer
-    self.decoder["02"] = function( self, encStr, elen, pos )
+    self.decoder["02"] = function( self, encStr, elen, pos, once )
       return self.decodeInt(encStr, elen, pos)
     end
 
     -- Octet String
-    self.decoder["04"] = function( self, encStr, elen, pos )
+    self.decoder["04"] = function( self, encStr, elen, pos, once )
       return bin.unpack("A" .. elen, encStr, pos)
     end
 
     -- Null
-    self.decoder["05"] = function( self, encStr, elen, pos )
+    self.decoder["05"] = function( self, encStr, elen, pos, once )
       return pos, false
     end
 
     -- Object Identifier
-    self.decoder["06"] = function( self, encStr, elen, pos )
+    self.decoder["06"] = function( self, encStr, elen, pos, once )
       return self:decodeOID( encStr, elen, pos )
     end
 
     -- Context specific tags
     --
-    self.decoder["30"] = function( self, encStr, elen, pos )
-      return self:decodeSeq(encStr, elen, pos)
+    self.decoder["30"] = function( self, encStr, elen, pos, once )
+      return self:decodeSeq(encStr, elen, pos, once)
     end
   end,
 
@@ -131,9 +131,12 @@ ASN1Decoder = {
   -- @name ASN1Decoder.decode
   -- @param encStr Encoded string.
   -- @param pos Current position in the string.
+  -- @param once Disables recursion if true.
   -- @return The position after decoding
   -- @return The decoded value(s).
-  decode = function(self, encStr, pos)
+  decode = function(self, encStr, pos, once)
+    assert(type(encStr) == "string")
+    pos = pos or 1
 
     local etype, elen
     local newpos = pos
@@ -142,7 +145,7 @@ ASN1Decoder = {
     newpos, elen = self.decodeLength(encStr, newpos)
 
     if self.decoder[etype] then
-      return self.decoder[etype]( self, encStr, elen, newpos )
+      return self.decoder[etype]( self, encStr, elen, newpos, once )
     else
       stdnse.debug1("no decoder for etype: " .. etype)
       return newpos, nil
@@ -186,13 +189,22 @@ ASN1Decoder = {
   -- @param encStr Encoded string.
   -- @param len Length of sequence in bytes.
   -- @param pos Current position in the string.
+  -- @param once Disables recursion if true.
   -- @return The position after decoding.
   -- @return The decoded sequence as a table.
-  decodeSeq = function(self, encStr, len, pos)
+  decodeSeq = function(self, encStr, len, pos, once)
+    assert(type(encStr) == "string")
+    len = len or #encStr
+    pos = pos or 1
+
     local seq = {}
     local sPos = 1
     local sStr
     pos, sStr = bin.unpack("A" .. len, encStr, pos)
+    if once then
+      return pos, sStr
+    end
+
     while (sPos < len) do
       local newSeq
       sPos, newSeq = self:decode(sStr, sPos)
@@ -562,7 +574,7 @@ end
 
 test_suite = unittest.TestSuite:new()
 
--- Test encoding bignums as integers.
+-- Test bignums.
 local tests = {
   {
     "00",
@@ -595,7 +607,7 @@ for _, test in ipairs(tests) do
   test_suite:add_test(unittest.equal(s, o), ("Encode BN %s"):format(i))
 end
 
--- Test encoding lengths.
+-- Test lengths.
 local tests = {
   {0, "00"},
   {1, "01"},
@@ -627,6 +639,35 @@ for _, test in ipairs(tests) do
 
   local _, d = dec.decodeLength(e)
   test_suite:add_test(unittest.equal(d, i), ("Decode Length %s"):format(o))
+end
+
+-- Test non-recursive sequences.
+local tests = {
+  {0, "30:00"},
+  {1, "30:01"},
+  {127, "30:7f"},
+  {128, "30:81:80"},
+  {254, "30:81:fe"},
+  {255, "30:81:ff"},
+  {256, "30:82:01:00"}
+}
+
+local dec = ASN1Decoder:new()
+dec:registerBaseDecoders()
+local enc = ASN1Encoder:new()
+for _, test in ipairs(tests) do
+  local i = test[1] -- Input length
+  local o = test[2] -- Output hex prefix
+  local x = ("X"):rep(i)
+
+  local e = enc:encodeSeq(x)
+  local s = stdnse.tohex(e, {separator = ":"})
+  test_suite:add_test(unittest.equal(s:sub(1, #o), o), ("Encode Sequence (once) %d for content"):format(i))
+  test_suite:add_test(unittest.equal(#s, #o + 3*i), ("Encode Sequence (once) %d for length"):format(i))
+
+  local _, d = dec:decode(e, nil, true)
+  test_suite:add_test(unittest.equal(d, x), ("Decode Sequence (once) %d for content"):format(i))
+  test_suite:add_test(unittest.equal(#d, i), ("Decode Sequence (once) %d for length"):format(i))
 end
 
 return _ENV;
