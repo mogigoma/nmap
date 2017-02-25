@@ -557,7 +557,7 @@ end
 test_suite = unittest.TestSuite:new()
 
 -- Test encoding bignums as integers.
-local bignums = {
+local tests = {
   {
     "00",
     "02:01:00"
@@ -581,12 +581,41 @@ local bignums = {
 }
 
 local enc = ASN1Encoder:new()
-for _, test in ipairs(bignums) do
+for _, test in ipairs(tests) do
   local i = test[1] -- Input hex
   local o = test[2] -- Output hex
   local e = enc.encodeBigNum(openssl.bignum_hex2bn(i))
   local s = stdnse.tohex(e, {separator = ":"})
   test_suite:add_test(unittest.equal(s, o), ("Encode BN %s"):format(i))
+end
+
+-- Test encoding lengths.
+local tests = {
+  {0, "00"},
+  {1, "01"},
+  {127, "7f"},
+  {128, "81:80"},
+  {254, "81:fe"},
+  {255, "81:ff"},
+  {256, "82:01:00"},
+  {65534, "82:ff:fe"},
+  {65535, "82:ff:ff"},
+  {65536, "83:01:00:00"},
+  {16777214, "83:ff:ff:fe"},
+  {16777215, "83:ff:ff:ff"},
+  {16777216, "84:01:00:00:00"},
+  {4294967294, "84:ff:ff:ff:fe"},
+  {4294967295, "84:ff:ff:ff:ff"},
+  {4294967296, "85:01:00:00:00:00"}
+}
+
+local enc = ASN1Encoder:new()
+for _, test in ipairs(tests) do
+  local i = test[1] -- Input num
+  local o = test[2] -- Output hex
+  local e = enc.encodeLength(i)
+  local s = stdnse.tohex(e, {separator = ":"})
+  test_suite:add_test(unittest.equal(s, o), ("Encode Length %d"):format(i))
 end
 
 return _ENV;
