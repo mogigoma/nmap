@@ -138,18 +138,23 @@ ASN1Decoder = {
     assert(type(encStr) == "string")
     pos = pos or 1
 
-    local etype, elen
+    local etype, elen, result
     local newpos = pos
+
+    -- If abspos doesn't exist, then we create it here and maintain
+    -- responsibility for it since we are the top-level decoding call.
+    local resp = false
 
     newpos, etype = bin.unpack("H1", encStr, newpos)
     newpos, elen = self.decodeLength(encStr, newpos)
 
-    if self.decoder[etype] then
-      return self.decoder[etype]( self, encStr, elen, newpos, once )
-    else
-      stdnse.debug1("no decoder for etype: " .. etype)
+    stdnse.debug1("Decoding etype 0x%s of length %d...", etype, elen)
+    if not self.decoder[etype] then
+      stdnse.debug1("No decoder for etype 0x%s.", etype)
       return newpos, nil
     end
+
+    return self.decoder[etype]( self, encStr, elen, newpos, once )
   end,
 
   ---
@@ -211,6 +216,7 @@ ASN1Decoder = {
       if ( not(newSeq) and self.stoponerror ) then break end
       table.insert(seq, newSeq)
     end
+
     return pos, seq
   end,
 
